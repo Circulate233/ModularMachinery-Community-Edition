@@ -1,6 +1,8 @@
 package github.kasuminova.mmce.common.world;
 
 import com.github.bsideup.jabel.Desugar;
+import github.kasuminova.mmce.common.tile.MEPatternMirrorImage;
+import github.kasuminova.mmce.common.tile.MEPatternProvider;
 import github.kasuminova.mmce.common.util.concurrent.ExecuteGroup;
 import hellfirepvp.modularmachinery.common.tiles.base.TileMultiblockMachineController;
 import it.unimi.dsi.fastutil.objects.ObjectArraySet;
@@ -40,16 +42,36 @@ public class MachineComponentManager {
 
     public void checkComponentShared(TileEntity component, TileMultiblockMachineController ctrl) {
         World world = component.getWorld();
-        BlockPos pos = component.getPos();
+        BlockPos pos;
+        TileEntity te;
+
+        if (component instanceof MEPatternMirrorImage mepi){
+            if (mepi.providerPos != null){
+                TileEntity tileEntity = world.getTileEntity(mepi.providerPos);
+                if (tileEntity instanceof MEPatternProvider mep){
+                    te = mep;
+                    pos = mep.getPos();
+                } else {
+                    te = component;
+                    pos = component.getPos();
+                }
+            } else {
+                te = component;
+                pos = component.getPos();
+            }
+        } else {
+            te = component;
+            pos = component.getPos();
+        }
 
         Map<BlockPos, ComponentInfo> posComponentMap = componentMap.computeIfAbsent(world, v -> new ConcurrentHashMap<>());
 
-        synchronized (component) {
+        synchronized (te) {
             ComponentInfo info = posComponentMap.computeIfAbsent(pos, v -> new ComponentInfo(
-                    component, pos, ReferenceSets.synchronize(new ReferenceOpenHashSet<>(Collections.singleton(ctrl)))));
+                    te, pos, ReferenceSets.synchronize(new ReferenceOpenHashSet<>(Collections.singleton(ctrl)))));
 
-            if (!info.areTileEntityEquals(component)) {
-                ComponentInfo newInfo = new ComponentInfo(component, pos, ReferenceSets.synchronize(new ReferenceOpenHashSet<>(Collections.singleton(ctrl))));
+            if (!info.areTileEntityEquals(te)) {
+                ComponentInfo newInfo = new ComponentInfo(te, pos, ReferenceSets.synchronize(new ReferenceOpenHashSet<>(Collections.singleton(ctrl))));
                 posComponentMap.put(pos, newInfo);
                 return;
             }
@@ -75,7 +97,27 @@ public class MachineComponentManager {
 
     public void removeOwner(TileEntity component, TileMultiblockMachineController ctrl) {
         World world = component.getWorld();
-        BlockPos pos = component.getPos();
+        BlockPos pos;
+        TileEntity te;
+
+        if (component instanceof MEPatternMirrorImage mepi){
+            if (mepi.providerPos != null){
+                TileEntity tileEntity = world.getTileEntity(mepi.providerPos);
+                if (tileEntity instanceof MEPatternProvider mep){
+                    te = mep;
+                    pos = mep.getPos();
+                } else {
+                    te = component;
+                    pos = component.getPos();
+                }
+            } else {
+                te = component;
+                pos = component.getPos();
+            }
+        } else {
+            te = component;
+            pos = component.getPos();
+        }
 
         Map<BlockPos, ComponentInfo> posComponentMap = componentMap.computeIfAbsent(world, v -> new ConcurrentHashMap<>());
 
@@ -84,8 +126,8 @@ public class MachineComponentManager {
             return;
         }
 
-        if (!info.areTileEntityEquals(component)) {
-            ComponentInfo newInfo = new ComponentInfo(component, pos, new ObjectArraySet<>());
+        if (!info.areTileEntityEquals(te)) {
+            ComponentInfo newInfo = new ComponentInfo(te, pos, new ObjectArraySet<>());
             posComponentMap.put(pos, newInfo);
         } else {
             Set<TileMultiblockMachineController> owners = info.owners;
