@@ -51,7 +51,6 @@ public class MachineRecipe implements Comparable<MachineRecipe> {
 
     protected static int counter = 0;
 
-    protected final boolean loadJEI;
     protected final int sortId;
     protected final String recipeFilePath;
     protected final ResourceLocation owningMachine, registryName;
@@ -66,6 +65,7 @@ public class MachineRecipe implements Comparable<MachineRecipe> {
     protected boolean parallelized;
     protected String threadName;
     protected int maxThreads;
+    protected boolean loadJEI;
 
     public MachineRecipe(String path, ResourceLocation registryName, ResourceLocation owningMachine,
                          int tickTime, int configuredPriority, boolean voidPerTickFailure, boolean parallelized) {
@@ -125,6 +125,7 @@ public class MachineRecipe implements Comparable<MachineRecipe> {
     public void mergeAdapter(final RecipeAdapterBuilder adapterBuilder) {
         this.parallelized = adapterBuilder.isParallelized();
         this.tooltipList.addAll(adapterBuilder.getTooltipList());
+        this.loadJEI = adapterBuilder.getLoadJEI();
         if (!adapterBuilder.getThreadName().isEmpty()) {
             this.threadName = adapterBuilder.getThreadName();
         }
