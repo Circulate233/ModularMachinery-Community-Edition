@@ -466,6 +466,12 @@ public class RecipeCraftingContext {
     public CraftingCheckResult canStartCrafting() {
         permanentModifierList.clear();
         if (getParentRecipe().isParallelized() && activeRecipe.getMaxParallelism() > 1) {
+            setParallelism(1);
+            CraftingCheckResult baseResult = canStartCrafting(true);
+            if (!baseResult.isSuccess()) {
+                return baseResult;
+            }
+
             Collection<RequirementComponents> parallelizable = getAllParallelizableComponents();
             int maxParallelism = getMaxParallelism(parallelizable);
             setParallelism(Math.max(1, maxParallelism));
@@ -473,6 +479,13 @@ public class RecipeCraftingContext {
             if (maxParallelism > 0 && parallelizable.size() >= getCurrentComponents().size()) {
                 return CraftingCheckResult.SUCCESS;
             }
+
+            CraftingCheckResult result = canStartCrafting(true);
+            if (!result.isSuccess()) {
+                setParallelism(1);
+                return baseResult;
+            }
+            return result;
         }
         return canStartCrafting(true);
     }
