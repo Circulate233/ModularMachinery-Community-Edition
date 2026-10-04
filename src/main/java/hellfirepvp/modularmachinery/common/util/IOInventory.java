@@ -22,7 +22,7 @@ import net.minecraftforge.common.util.Constants;
 import javax.annotation.Nonnull;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.IntConsumer;
+import java.util.function.Consumer;
 
 /**
  * This class is part of the Modular Machinery Mod
@@ -61,6 +61,17 @@ public class IOInventory extends IItemHandlerImpl implements ReadWriteLockProvid
     public IOInventory setListener(IntConsumer listener) {
         this.listener = listener;
         return this;
+    }
+
+    @FunctionalInterface
+    public interface IntConsumer extends Consumer<Integer> {
+
+        @Override
+        default void accept(Integer integer) {
+            accept(integer.intValue());
+        }
+
+        void accept(int i);
     }
 
     public TileEntitySynchronized getOwner() {

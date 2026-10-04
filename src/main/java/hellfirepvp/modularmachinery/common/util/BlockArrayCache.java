@@ -12,21 +12,39 @@ import net.minecraft.util.EnumFacing;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class BlockArrayCache {
     private static final Long2ObjectMap<EnumMap<EnumFacing, BlockArray>> BLOCK_ARRAY_CACHE_MAP = new Long2ObjectOpenHashMap<>();
+    public static CompletableFuture<Void> w;
 
     private static final AtomicLong UID_COUNTER = new AtomicLong(0);
 
     public static TaggedPositionBlockArray getBlockArrayCache(TaggedPositionBlockArray blockArray, EnumFacing facing) {
+        stop();
         return (TaggedPositionBlockArray) BLOCK_ARRAY_CACHE_MAP.computeIfAbsent(
             blockArray.uid, e -> new EnumMap<>(EnumFacing.class)).get(facing);
     }
 
     public static BlockArray getBlockArrayCache(BlockArray blockArray, EnumFacing facing) {
+        stop();
         return BLOCK_ARRAY_CACHE_MAP.computeIfAbsent(
             blockArray.uid, e -> new EnumMap<>(EnumFacing.class)).get(facing);
+    }
+
+    private static void stop() {
+        try {
+            if (w != null) {
+                synchronized (BlockArrayCache.class) {
+                    if (w != null) w.get();
+                    w = null;
+                }
+            }
+        } catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static synchronized void addBlockArrayCache(TaggedPositionBlockArray blockArray, EnumFacing facing) {

@@ -13,6 +13,7 @@ import net.minecraftforge.fluids.BlockFluidBase;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class IBlockStateDescriptor {
@@ -109,9 +110,34 @@ public class IBlockStateDescriptor {
         }
     }
 
+    /**
+     * Compares the two state lists element by element.
+     *
+     * <p>{@code applicable} is only ever a {@code SingletonList} or a {@code ReferenceArrayList}, both of which
+     * answer {@code get(int)} in constant time, so walking the lists by index stays linear. Going through
+     * {@code List.equals} instead makes {@code AbstractList} allocate a pair of iterators for <em>every</em>
+     * comparison, and this is called once per candidate during the pool lookup in {@link #canonicalize()} - the
+     * comparison itself is the hot path, the states it compares are not.</p>
+     */
     @Override
     public boolean equals(final Object obj) {
-        return obj instanceof IBlockStateDescriptor && applicable.equals(((IBlockStateDescriptor) obj).applicable);
+        if (!(obj instanceof IBlockStateDescriptor)) {
+            return false;
+        }
+        final List<IBlockState> other = ((IBlockStateDescriptor) obj).applicable;
+        if (this.applicable == other) {
+            return true;
+        }
+        final int size = this.applicable.size();
+        if (size != other.size()) {
+            return false;
+        }
+        for (int i = 0; i < size; i++) {
+            if (!Objects.equals(this.applicable.get(i), other.get(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

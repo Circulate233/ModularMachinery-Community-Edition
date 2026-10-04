@@ -372,14 +372,6 @@ public class TileFactoryController extends TileMultiblockMachineController {
     }
 
     @Override
-    protected void resetMachine(boolean clearData) {
-        super.resetMachine(clearData);
-        if (clearData) {
-            extraThreadCount = 0;
-        }
-    }
-
-    @Override
     protected void resetRecipe() {
         recipeThreadList.clear();
         coreRecipeThreads.clear();
@@ -578,6 +570,13 @@ public class TileFactoryController extends TileMultiblockMachineController {
     public void readCustomNBT(NBTTagCompound compound) {
         super.readCustomNBT(compound);
 
+        if (compound.hasKey("extraThreadCount", Constants.NBT.TAG_ANY_NUMERIC)) {
+            extraThreadCount = compound.getInteger("extraThreadCount");
+        } else if (compound.hasKey("extraThreadCount")) {
+            ModularMachinery.log.warn("Ignoring extraThreadCount with invalid NBT type {} on factory controller at {}",
+                compound.getTagId("extraThreadCount"), getPos());
+        }
+
         if (!isStructureFormed()) {
             return;
         }
@@ -587,8 +586,6 @@ public class TileFactoryController extends TileMultiblockMachineController {
         if (compound.hasKey("status")) {
             controllerStatus = CraftingStatus.deserialize(compound.getCompoundTag("status"));
         }
-
-        extraThreadCount = compound.getByte("extraThreadCount");
 
         recipeThreadList.clear();
         coreRecipeThreads.clear();
@@ -622,14 +619,23 @@ public class TileFactoryController extends TileMultiblockMachineController {
 
     @Override
     protected void readMachineNBT(NBTTagCompound compound) {
-        if (compound.hasKey("parentMachine")) {
-            ResourceLocation rl = new ResourceLocation(compound.getString("parentMachine"));
-            parentMachine = MachineRegistry.getRegistry().getMachine(rl);
-            if (parentMachine != null) {
-                parentController = BlockFactoryController.FACTORY_CONTROLLERS.get(parentMachine);
-            } else {
-                ModularMachinery.log.info("Couldn't find machine named {} for controller at {}", rl, getPos());
+        if (compound.hasKey("parentMachine", Constants.NBT.TAG_STRING)) {
+            String parentMachineName = compound.getString("parentMachine");
+            try {
+                ResourceLocation rl = new ResourceLocation(parentMachineName);
+                parentMachine = MachineRegistry.getRegistry().getMachine(rl);
+                if (parentMachine != null) {
+                    parentController = BlockFactoryController.FACTORY_CONTROLLERS.get(parentMachine);
+                } else {
+                    ModularMachinery.log.info("Couldn't find machine named {} for controller at {}", rl, getPos());
+                }
+            } catch (IllegalArgumentException e) {
+                ModularMachinery.log.warn("Ignoring invalid parent machine identifier {} on factory controller at {}",
+                    parentMachineName, getPos(), e);
             }
+        } else if (compound.hasKey("parentMachine")) {
+            ModularMachinery.log.warn("Ignoring parentMachine with invalid NBT type {} on factory controller at {}",
+                compound.getTagId("parentMachine"), getPos());
         }
         super.readMachineNBT(compound);
     }
@@ -637,6 +643,8 @@ public class TileFactoryController extends TileMultiblockMachineController {
     @Override
     public void writeCustomNBT(NBTTagCompound compound) {
         super.writeCustomNBT(compound);
+
+        compound.setInteger("extraThreadCount", extraThreadCount);
 
         if (!isStructureFormed()) {
             return;
@@ -656,7 +664,6 @@ public class TileFactoryController extends TileMultiblockMachineController {
 
         compound.setTag("status", controllerStatus.serialize());
         compound.setInteger("totalParallelism", getMaxParallelism());
-        compound.setShort("extraThreadCount", (short) extraThreadCount);
     }
 
     @Override
@@ -714,6 +721,7 @@ public class TileFactoryController extends TileMultiblockMachineController {
     @Override
     public void setExtraThreadCount(final int extraThreadCount) {
         this.extraThreadCount = extraThreadCount;
+        markNoUpdateSync();
     }
 
     @Override

@@ -30,10 +30,19 @@ public class ResultChance {
         }
     };
 
-    private final Random rand;
+    // 大多数实例只用于 chance >= 1.0 的快速路径（或 GUARANTEED 单例），Random 懒初始化以避免每次构造的分配。
+    private final long seed;
+    private Random rand;
 
     public ResultChance(long seed) {
-        this.rand = new Random(seed);
+        this.seed = seed;
+    }
+
+    private Random rand() {
+        if (this.rand == null) {
+            this.rand = new Random(this.seed);
+        }
+        return this.rand;
     }
 
     /**
@@ -44,7 +53,7 @@ public class ResultChance {
      */
     @Deprecated
     public boolean canProduce(float chance) {
-        return chance <= rand.nextFloat();
+        return chance <= rand().nextFloat();
     }
 
     public boolean canWork(float chance) {
@@ -55,7 +64,7 @@ public class ResultChance {
             return false;
         }
 
-        return chance > rand.nextFloat();
+        return chance > rand().nextFloat();
     }
 
 }

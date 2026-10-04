@@ -9,7 +9,7 @@ plugins {
     id("maven-publish")
     id("org.jetbrains.gradle.plugin.idea-ext") version "1.1.7"
     id("eclipse")
-    id("com.gtnewhorizons.retrofuturagradle") version "1.4.0"
+    id("com.gtnewhorizons.retrofuturagradle") version "2.0.2"
 }
 
 // Project properties
@@ -98,6 +98,10 @@ tasks.jar.configure {
 tasks.javadoc.configure {
     // No need for JavaDoc.
     actions = Collections.emptyList()
+}
+
+tasks.named("compilePatchedMcKotlin") {
+    dependsOn(tasks.named("decompressDecompiledSources"))
 }
 
 // Create a new dependency type for runtime-only dependencies that don't get included in the maven publication
@@ -246,6 +250,9 @@ dependencies {
     // Optimization
     implementation(rfg.deobf("curse.maven:stellarcore-1064321:5560444"))
     implementation(rfg.deobf("curse.maven:configanytime-870276:5212709"))
+
+    // ConnectedTexturesMod (CTM) for cross-block connected textures support
+    compileOnly(rfg.deobf("curse.maven:ctm-267602:2642375"))
 }
 
 // Publishing to a Maven repository
@@ -343,4 +350,12 @@ idea {
 
 tasks.processIdeaSettings.configure {
     dependsOn(tasks.injectTags)
+}
+
+tasks.named("compileInjectedTagsKotlin") {
+    dependsOn(tasks.named("injectTags"))
+}
+
+tasks.named("compileMcLauncherKotlin") {
+    dependsOn(tasks.named("createMcLauncherFiles"))
 }

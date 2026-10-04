@@ -91,12 +91,60 @@ public class IItemHandlerImpl implements IItemHandlerModifiable {
     }
 
     public IItemHandlerImpl copy() {
-        IItemHandlerImpl copy = new IItemHandlerImpl(inSlots, outSlots, accessibleSides);
-        for (int i = 0; i < inventory.length; i++) {
-            copy.inventory[i] = inventory[i].copy();
+        IItemHandlerImpl copy = new IItemHandlerImpl();
+        copy.inSlots = inSlots;
+        copy.outSlots = outSlots;
+        copy.accessibleSides = accessibleSides;
+
+        int size = Math.max(getArrayMax(inSlots), getArrayMax(outSlots)) + 1;
+        copy.slotLimits = new int[size];
+        Arrays.fill(copy.slotLimits, DEFAULT_SLOT_LIMIT);
+        System.arraycopy(slotLimits, 0, copy.slotLimits, 0, Math.min(slotLimits.length, size));
+
+        SlotStackHolder[] inventory = new SlotStackHolder[size];
+        int copyLen = Math.min(this.inventory.length, size);
+        for (int i = 0; i < copyLen; i++) {
+            inventory[i] = this.inventory[i].copy();
         }
-        System.arraycopy(slotLimits, 0, copy.slotLimits, 0, slotLimits.length);
+        for (int i = copyLen; i < size; i++) {
+            inventory[i] = new SlotStackHolder(i);
+        }
+        copy.inventory = inventory;
         return copy;
+    }
+
+    /**
+     * <p>将 source 的结构与内容复制进当前实例，尽可能复用已持有的槽数组与 {@link SlotStackHolder}，
+     * 语义与 {@link #copy()} 一致，但仅在槽位规模变化时重新分配结构。</p>
+     *
+     * <p>仅供工作副本复用场景使用，调用后当前实例即等价于 source 的 {@link #copy()}。</p>
+     */
+    public IItemHandlerImpl copyFrom(final IItemHandlerImpl source) {
+        this.allowAnySlots = false;
+        this.inSlots = source.inSlots;
+        this.outSlots = source.outSlots;
+        this.miscSlots = new int[0];
+        this.accessibleSides = source.accessibleSides;
+
+        int size = Math.max(getArrayMax(source.inSlots), getArrayMax(source.outSlots)) + 1;
+        if (this.slotLimits == null || this.slotLimits.length != size) {
+            this.slotLimits = new int[size];
+        }
+        Arrays.fill(this.slotLimits, DEFAULT_SLOT_LIMIT);
+        System.arraycopy(source.slotLimits, 0, this.slotLimits, 0, Math.min(source.slotLimits.length, size));
+
+        if (this.inventory == null || this.inventory.length != size) {
+            this.inventory = new SlotStackHolder[size];
+            for (int i = 0; i < size; i++) {
+                this.inventory[i] = new SlotStackHolder(i);
+            }
+        }
+        int len = Math.min(source.inventory.length, size);
+        for (int i = 0; i < len; i++) {
+            ItemStack sourceStack = source.inventory[i].itemStack.get();
+            this.inventory[i].itemStack.set(sourceStack.isEmpty() ? ItemStack.EMPTY : sourceStack.copy());
+        }
+        return this;
     }
 
     public IItemHandlerImpl fastCopy() {

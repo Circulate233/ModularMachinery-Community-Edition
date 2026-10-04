@@ -30,6 +30,7 @@ import net.minecraftforge.oredict.OreDictionary;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -59,186 +60,241 @@ public class ItemUtils {
     //Negative amount: overhead fuel burnt
     //Positive amount: Failure/couldn't find enough fuel
     public static int consumeFromInventoryFuel(IItemHandlerModifiable handler, int fuelAmtToConsume, boolean simulate, @Nullable NBTTagCompound matchNBTTag) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventoryFuel(handler, matchNBTTag);
-        if (contents.isEmpty()) {
-            return fuelAmtToConsume;
-        }
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventoryFuel(handler, matchNBTTag, contents);
+            if (contents.isEmpty()) {
+                return fuelAmtToConsume;
+            }
 
-        for (int slot : contents.keySet()) {
-            ItemStack inSlot = contents.get(slot);
-            if (inSlot.getItem().hasContainerItem(inSlot)) {
-                if (inSlot.getCount() > 1) {
-                    continue; //uh... rip. we won't consume 16 buckets at once.
+            for (int slot : contents.keySet()) {
+                ItemStack inSlot = contents.get(slot);
+                if (inSlot.getItem().hasContainerItem(inSlot)) {
+                    if (inSlot.getCount() > 1) {
+                        continue; //uh... rip. we won't consume 16 buckets at once.
+                    }
+                    ItemStack stack = ForgeHooks.getContainerItem(inSlot);
+                    fuelAmtToConsume -= TileEntityFurnace.getItemBurnTime(inSlot);
+                    if (!simulate) {
+                        handler.setStackInSlot(slot, stack.copy());
+                    }
+                    if (fuelAmtToConsume <= 0) {
+                        break;
+                    }
                 }
-                ItemStack stack = ForgeHooks.getContainerItem(inSlot);
-                fuelAmtToConsume -= TileEntityFurnace.getItemBurnTime(inSlot);
+                int fuelPer = TileEntityFurnace.getItemBurnTime(inSlot);
+                int toConsumeDiv = fuelAmtToConsume / fuelPer;
+                int fuelMod = fuelAmtToConsume % fuelPer;
+
+                int toConsume = toConsumeDiv + (fuelMod > 0 ? 1 : 0);
+                int toRemove = Math.min(toConsume, inSlot.getCount());
+
+                fuelAmtToConsume -= toRemove * fuelPer;
                 if (!simulate) {
-                    handler.setStackInSlot(slot, stack.copy());
+                    handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
                 }
                 if (fuelAmtToConsume <= 0) {
                     break;
                 }
             }
-            int fuelPer = TileEntityFurnace.getItemBurnTime(inSlot);
-            int toConsumeDiv = fuelAmtToConsume / fuelPer;
-            int fuelMod = fuelAmtToConsume % fuelPer;
-
-            int toConsume = toConsumeDiv + (fuelMod > 0 ? 1 : 0);
-            int toRemove = Math.min(toConsume, inSlot.getCount());
-
-            fuelAmtToConsume -= toRemove * fuelPer;
-            if (!simulate) {
-                handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
-            }
-            if (fuelAmtToConsume <= 0) {
-                break;
-            }
+            return fuelAmtToConsume;
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return fuelAmtToConsume;
     }
 
     public static boolean consumeFromInventory(IItemHandlerModifiable handler, ItemStack toConsume, boolean simulate, @Nullable NBTTagCompound matchNBTTag) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toConsume, false, matchNBTTag);
-        if (contents.isEmpty()) {
-            return false;
-        }
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toConsume, false, matchNBTTag, contents);
+            if (contents.isEmpty()) {
+                return false;
+            }
 
-        int cAmt = toConsume.getCount();
-        for (int slot : contents.keySet()) {
-            ItemStack inSlot = contents.get(slot);
-            if (inSlot.getItem().hasContainerItem(inSlot)) {
-                if (inSlot.getCount() > 1) {
-                    continue; //uh... rip. we won't consume 16 buckets at once.
+            int cAmt = toConsume.getCount();
+            for (int slot : contents.keySet()) {
+                ItemStack inSlot = contents.get(slot);
+                if (inSlot.getItem().hasContainerItem(inSlot)) {
+                    if (inSlot.getCount() > 1) {
+                        continue; //uh... rip. we won't consume 16 buckets at once.
+                    }
+                    ItemStack stack = ForgeHooks.getContainerItem(inSlot);
+                    cAmt--;
+                    if (!simulate) {
+                        handler.setStackInSlot(slot, stack.copy());
+                    }
+                    if (cAmt <= 0) {
+                        break;
+                    }
                 }
-                ItemStack stack = ForgeHooks.getContainerItem(inSlot);
-                cAmt--;
+                int toRemove = Math.min(cAmt, inSlot.getCount());
+                cAmt -= toRemove;
                 if (!simulate) {
-                    handler.setStackInSlot(slot, stack.copy());
+                    handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
                 }
                 if (cAmt <= 0) {
                     break;
                 }
             }
-            int toRemove = Math.min(cAmt, inSlot.getCount());
-            cAmt -= toRemove;
-            if (!simulate) {
-                handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
-            }
-            if (cAmt <= 0) {
-                break;
-            }
+            return cAmt <= 0;
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return cAmt <= 0;
     }
 
     public static boolean consumeFromInventory(IItemHandlerModifiable handler, ItemStack toConsume, boolean simulate, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toConsume, false, itemChecker, controller);
-        if (contents.isEmpty()) {
-            return false;
-        }
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toConsume, false, itemChecker, controller, contents);
+            if (contents.isEmpty()) {
+                return false;
+            }
 
-        int cAmt = toConsume.getCount();
-        for (int slot : contents.keySet()) {
-            ItemStack inSlot = contents.get(slot);
-            if (inSlot.getItem().hasContainerItem(inSlot)) {
-                if (inSlot.getCount() > 1) {
-                    continue; //uh... rip. we won't consume 16 buckets at once.
+            int cAmt = toConsume.getCount();
+            for (int slot : contents.keySet()) {
+                ItemStack inSlot = contents.get(slot);
+                if (inSlot.getItem().hasContainerItem(inSlot)) {
+                    if (inSlot.getCount() > 1) {
+                        continue; //uh... rip. we won't consume 16 buckets at once.
+                    }
+                    ItemStack stack = ForgeHooks.getContainerItem(inSlot);
+                    cAmt--;
+                    if (!simulate) {
+                        handler.setStackInSlot(slot, stack.copy());
+                    }
+                    if (cAmt <= 0) {
+                        break;
+                    }
                 }
-                ItemStack stack = ForgeHooks.getContainerItem(inSlot);
-                cAmt--;
+                int toRemove = Math.min(cAmt, inSlot.getCount());
+                cAmt -= toRemove;
                 if (!simulate) {
-                    handler.setStackInSlot(slot, stack.copy());
+                    handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
                 }
                 if (cAmt <= 0) {
                     break;
                 }
             }
-            int toRemove = Math.min(cAmt, inSlot.getCount());
-            cAmt -= toRemove;
-            if (!simulate) {
-                handler.setStackInSlot(slot, copyStackWithSize(inSlot, inSlot.getCount() - toRemove));
-            }
-            if (cAmt <= 0) {
-                break;
-            }
+            return cAmt <= 0;
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return cAmt <= 0;
     }
 
     public static int consumeAll(IItemHandlerModifiable handler, ItemStack toConsume, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toConsume, false, itemChecker, controller);
-        if (toConsume.getCount() <= 0 || contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toConsume, false, itemChecker, controller, contents);
+            if (toConsume.getCount() <= 0 || contents.isEmpty()) {
+                return 0;
+            }
+            return consumeAllInternal(handler, contents, toConsume.getCount());
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return consumeAllInternal(handler, contents, toConsume.getCount());
     }
 
     public static int consumeAll(IItemHandlerModifiable handler, ItemStack toConsume, @Nullable NBTTagCompound matchNBTTag) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toConsume, false, matchNBTTag);
-        if (toConsume.getCount() <= 0 || contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toConsume, false, matchNBTTag, contents);
+            if (toConsume.getCount() <= 0 || contents.isEmpty()) {
+                return 0;
+            }
+            return consumeAllInternal(handler, contents, toConsume.getCount());
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return consumeAllInternal(handler, contents, toConsume.getCount());
     }
 
     public static int consumeAll(IItemHandlerModifiable handler, String oreName, int amount, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventoryOreDict(handler, oreName, itemChecker, controller);
-        if (amount <= 0 || contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventoryOreDict(handler, oreName, itemChecker, controller, contents);
+            if (amount <= 0 || contents.isEmpty()) {
+                return 0;
+            }
+            return consumeAllInternal(handler, contents, amount);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return consumeAllInternal(handler, contents, amount);
     }
 
     public static int consumeAll(IItemHandlerModifiable handler, String oreName, int amount, @Nullable NBTTagCompound matchNBTTag) {
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventoryOreDict(handler, oreName, matchNBTTag);
-        if (amount <= 0 || contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventoryOreDict(handler, oreName, matchNBTTag, contents);
+            if (amount <= 0 || contents.isEmpty()) {
+                return 0;
+            }
+            return consumeAllInternal(handler, contents, amount);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return consumeAllInternal(handler, contents, amount);
     }
 
     public static int damageAll(IItemHandlerModifiable handler, ItemStack toDamage, int amount, int damagePerUse, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
         if (amount <= 0 || damagePerUse <= 0) {
             return 0;
         }
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toDamage, false, itemChecker, controller);
-        if (contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toDamage, false, itemChecker, controller, contents);
+            if (contents.isEmpty()) {
+                return 0;
+            }
+            return damageAllInternal(handler, contents, amount, damagePerUse);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return damageAllInternal(handler, contents, amount, damagePerUse);
     }
 
     public static int damageAll(IItemHandlerModifiable handler, ItemStack toDamage, int amount, int damagePerUse, @Nullable NBTTagCompound matchNBTTag) {
         if (amount <= 0 || damagePerUse <= 0) {
             return 0;
         }
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventory(handler, toDamage, false, matchNBTTag);
-        if (contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventory(handler, toDamage, false, matchNBTTag, contents);
+            if (contents.isEmpty()) {
+                return 0;
+            }
+            return damageAllInternal(handler, contents, amount, damagePerUse);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return damageAllInternal(handler, contents, amount, damagePerUse);
     }
 
     public static int damageAll(IItemHandlerModifiable handler, String oreName, int amount, int damagePerUse, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
         if (amount <= 0 || damagePerUse <= 0) {
             return 0;
         }
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventoryOreDict(handler, oreName, itemChecker, controller);
-        if (contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventoryOreDict(handler, oreName, itemChecker, controller, contents);
+            if (contents.isEmpty()) {
+                return 0;
+            }
+            return damageAllInternal(handler, contents, amount, damagePerUse);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return damageAllInternal(handler, contents, amount, damagePerUse);
     }
 
     public static int damageAll(IItemHandlerModifiable handler, String oreName, int amount, int damagePerUse, @Nullable NBTTagCompound matchNBTTag) {
         if (amount <= 0 || damagePerUse <= 0) {
             return 0;
         }
-        Int2ObjectMap<ItemStack> contents = findItemsIndexedInInventoryOreDict(handler, oreName, matchNBTTag);
-        if (contents.isEmpty()) {
-            return 0;
+        Int2ObjectMap<ItemStack> contents = borrowIndexedScratch(handler.getSlots() * 2);
+        try {
+            fillItemsIndexedInInventoryOreDict(handler, oreName, matchNBTTag, contents);
+            if (contents.isEmpty()) {
+                return 0;
+            }
+            return damageAllInternal(handler, contents, amount, damagePerUse);
+        } finally {
+            returnIndexedScratch(contents);
         }
-        return damageAllInternal(handler, contents, amount, damagePerUse);
     }
 
     public static boolean hasDamageableEntry(final String oreDictName) {
@@ -432,17 +488,26 @@ public class ItemUtils {
 
     public static Int2ObjectMap<ItemStack> findItemsIndexedInInventoryFuel(IItemHandlerModifiable handler, @Nullable NBTTagCompound matchNBTTag) {
         Int2ObjectMap<ItemStack> stacksOut = new Int2ObjectOpenHashMap<>(handler.getSlots() * 2);
+        fillItemsIndexedInInventoryFuel(handler, matchNBTTag, stacksOut);
+        return stacksOut;
+    }
+
+    private static void fillItemsIndexedInInventoryFuel(IItemHandlerModifiable handler, @Nullable NBTTagCompound matchNBTTag, Int2ObjectMap<ItemStack> out) {
         for (int j = 0; j < handler.getSlots(); j++) {
             ItemStack s = handler.getStackInSlot(j);
             if (TileEntityFurnace.getItemBurnTime(s) > 0 && NBTMatchingHelper.matchNBTCompound(matchNBTTag, s.getTagCompound())) {
-                stacksOut.put(j, s);
+                out.put(j, s);
             }
         }
-        return stacksOut;
     }
 
     public static Int2ObjectMap<ItemStack> findItemsIndexedInInventoryOreDict(IItemHandlerModifiable handler, String oreDict, @Nullable NBTTagCompound matchNBTTag) {
         Int2ObjectMap<ItemStack> stacksOut = new Int2ObjectOpenHashMap<>(handler.getSlots() * 2);
+        fillItemsIndexedInInventoryOreDict(handler, oreDict, matchNBTTag, stacksOut);
+        return stacksOut;
+    }
+
+    private static void fillItemsIndexedInInventoryOreDict(IItemHandlerModifiable handler, String oreDict, @Nullable NBTTagCompound matchNBTTag, Int2ObjectMap<ItemStack> out) {
         for (int j = 0; j < handler.getSlots(); j++) {
             ItemStack s = handler.getStackInSlot(j);
             if (s.isEmpty()) {
@@ -451,16 +516,20 @@ public class ItemUtils {
             int[] ids = OredictCache.getOreIDsFast(s);
             for (int id : ids) {
                 if (OreDictionary.getOreName(id).equals(oreDict) && NBTMatchingHelper.matchNBTCompound(matchNBTTag, s.getTagCompound())) {
-                    stacksOut.put(j, s);
+                    out.put(j, s);
                     break;
                 }
             }
         }
-        return stacksOut;
     }
 
     public static Int2ObjectMap<ItemStack> findItemsIndexedInInventoryOreDict(IItemHandlerModifiable handler, String oreDict, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
         Int2ObjectMap<ItemStack> stacksOut = new Int2ObjectOpenHashMap<>(handler.getSlots() * 2);
+        fillItemsIndexedInInventoryOreDict(handler, oreDict, itemChecker, controller, stacksOut);
+        return stacksOut;
+    }
+
+    private static void fillItemsIndexedInInventoryOreDict(IItemHandlerModifiable handler, String oreDict, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller, Int2ObjectMap<ItemStack> out) {
         for (int j = 0; j < handler.getSlots(); j++) {
             ItemStack s = handler.getStackInSlot(j);
             if (s.isEmpty()) {
@@ -469,35 +538,71 @@ public class ItemUtils {
             int[] ids = OredictCache.getOreIDsFast(s);
             for (int id : ids) {
                 if (OreDictionary.getOreName(id).equals(oreDict) && itemChecker.isMatch(controller, s)) {
-                    stacksOut.put(j, s);
+                    out.put(j, s);
                     break;
                 }
             }
         }
-        return stacksOut;
     }
 
     public static Int2ObjectMap<ItemStack> findItemsIndexedInInventory(IItemHandlerModifiable handler, ItemStack match, boolean strict, @Nullable NBTTagCompound matchNBTTag) {
         Int2ObjectMap<ItemStack> stacksOut = new Int2ObjectOpenHashMap<>(handler.getSlots() * 2);
+        fillItemsIndexedInInventory(handler, match, strict, matchNBTTag, stacksOut);
+        return stacksOut;
+    }
+
+    private static void fillItemsIndexedInInventory(IItemHandlerModifiable handler, ItemStack match, boolean strict, @Nullable NBTTagCompound matchNBTTag, Int2ObjectMap<ItemStack> out) {
         for (int j = 0; j < handler.getSlots(); j++) {
             ItemStack s = handler.getStackInSlot(j);
             if ((strict ? matchStacks(s, match) : matchStackLoosely(s, match)) && NBTMatchingHelper.matchNBTCompound(matchNBTTag, s.getTagCompound())) {
-                stacksOut.put(j, s);
+                out.put(j, s);
             }
         }
-        return stacksOut;
     }
 
     public static Int2ObjectMap<ItemStack> findItemsIndexedInInventory(IItemHandlerModifiable handler, ItemStack match, boolean strict, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller) {
         Int2ObjectMap<ItemStack> stacksOut = new Int2ObjectOpenHashMap<>(handler.getSlots() * 2);
+        fillItemsIndexedInInventory(handler, match, strict, itemChecker, controller, stacksOut);
+        return stacksOut;
+    }
+
+    private static void fillItemsIndexedInInventory(IItemHandlerModifiable handler, ItemStack match, boolean strict, AdvancedItemChecker itemChecker, TileMultiblockMachineController controller, Int2ObjectMap<ItemStack> out) {
         for (int j = 0; j < handler.getSlots(); j++) {
             ItemStack s = handler.getStackInSlot(j);
             if ((strict ? matchStacks(s, match) : matchStackLoosely(s, match)) && itemChecker.isMatch(controller, s)) {
-                stacksOut.put(j, s);
+                out.put(j, s);
             }
         }
-        return stacksOut;
     }
+
+    /**
+     * <p>借用线程本地的槽位索引 scratch map。索引 map 仅在 {@code consumeAll} / {@code damageAll} 等
+     * 方法内部同步使用、不逃逸出本类，因此可以安全复用。</p>
+     *
+     * <p>深度计数防止重入（例如特殊 handler 在写入时再次触发本类方法）导致内容被覆盖；
+     * 重入时退回临时分配。</p>
+     */
+    private static Int2ObjectMap<ItemStack> borrowIndexedScratch(int expectedSize) {
+        IndexedScratch scratch = INDEXED_SCRATCH.get();
+        scratch.depth++;
+        if (scratch.depth > 1) {
+            return new Int2ObjectOpenHashMap<>(expectedSize);
+        }
+        Int2ObjectOpenHashMap<ItemStack> map = scratch.map;
+        map.clear();
+        return map;
+    }
+
+    private static void returnIndexedScratch(Int2ObjectMap<ItemStack> borrowed) {
+        INDEXED_SCRATCH.get().depth--;
+    }
+
+    private static final class IndexedScratch {
+        final Int2ObjectOpenHashMap<ItemStack> map = new Int2ObjectOpenHashMap<>();
+        int depth = 0;
+    }
+
+    private static final ThreadLocal<IndexedScratch> INDEXED_SCRATCH = ThreadLocal.withInitial(IndexedScratch::new);
 
     public static boolean matchStacks(@Nonnull ItemStack stack, @Nonnull ItemStack other) {
         if (!ItemStack.areItemsEqual(stack, other)) {
@@ -547,13 +652,20 @@ public class ItemUtils {
 
     @Nonnull
     public static List<ProcessingComponent<?>> copyItemHandlerComponents(final List<ProcessingComponent<?>> components) {
-        List<ProcessingComponent<?>> list = new ArrayList<>();
+        CopyShellPool pool = COPY_SHELL_POOL.get();
+        boolean pooled = pool.canBorrow();
+
+        List<ProcessingComponent<?>> list = new ArrayList<>(components.size());
         for (ProcessingComponent<?> component : components) {
             Object provided = component.getProvidedComponent();
             IItemHandlerImpl handler = null;
 
             if (provided instanceof IItemHandlerImpl handlerMM) {
-                handler = handlerMM.copy();
+                if (pooled) {
+                    handler = pool.borrow().copyFrom(handlerMM);
+                } else {
+                    handler = handlerMM.copy();
+                }
             } else if (provided instanceof IItemHandlerModifiable handlerDefault) {
                 handler = new IItemHandlerImpl(handlerDefault);
             }
@@ -567,6 +679,69 @@ public class ItemUtils {
             }
         }
         return list;
+    }
+
+    /**
+     * <p>开启一个 handler 拷贝会话。会话期间 {@link #copyItemHandlerComponents(List)} 生成的
+     * {@link IItemHandlerImpl} 副本会复用线程本地的空壳对象（仅刷新内容，不重建结构），
+     * 会话结束后空壳归还池中。</p>
+     *
+     * <p><strong>注意：会话结束后，会话期间生成的副本不得再被引用或修改。</strong></p>
+     * <p>会话必须以 try/finally 配对，异常路径也应调用 {@link #endHandlerCopySession()}。</p>
+     */
+    public static void beginHandlerCopySession() {
+        COPY_SHELL_POOL.get().enter();
+    }
+
+    /**
+     * <p>结束当前线程的 handler 拷贝会话，归还本会话借出的全部空壳。</p>
+     *
+     * @see #beginHandlerCopySession()
+     */
+    public static void endHandlerCopySession() {
+        COPY_SHELL_POOL.get().exit();
+    }
+
+    private static final int COPY_SHELL_POOL_LIMIT = 64;
+    private static final ThreadLocal<CopyShellPool> COPY_SHELL_POOL = ThreadLocal.withInitial(CopyShellPool::new);
+
+    private static final class CopyShellPool {
+        private final ArrayDeque<IItemHandlerImpl> free = new ArrayDeque<>();
+        private final List<IItemHandlerImpl> leased = new ArrayList<>();
+        private int depth = 0;
+
+        void enter() {
+            this.depth++;
+        }
+
+        boolean canBorrow() {
+            return this.depth > 0;
+        }
+
+        IItemHandlerImpl borrow() {
+            IItemHandlerImpl shell = this.free.pollFirst();
+            if (shell == null) {
+                shell = new IItemHandlerImpl();
+            }
+            this.leased.add(shell);
+            return shell;
+        }
+
+        void exit() {
+            if (this.depth > 0) {
+                this.depth--;
+            }
+            if (this.depth != 0) {
+                return;
+            }
+            for (IItemHandlerImpl shell : this.leased) {
+                if (this.free.size() >= COPY_SHELL_POOL_LIMIT) {
+                    break;
+                }
+                this.free.offerLast(shell);
+            }
+            this.leased.clear();
+        }
     }
 
     @Nonnull

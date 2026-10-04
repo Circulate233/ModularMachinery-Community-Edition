@@ -205,7 +205,7 @@ public class CommonProxy implements IGuiHandler {
     }
 
     public void loadComplete() {
-        CompletableFuture.runAsync(() -> BlockArrayCache.buildCache(MachineRegistry.getLoadedMachines()));
+        BlockArrayCache.w = CompletableFuture.runAsync(() -> BlockArrayCache.buildCache(MachineRegistry.getLoadedMachines()));
     }
 
     public void registerBlockModel(Block block) {

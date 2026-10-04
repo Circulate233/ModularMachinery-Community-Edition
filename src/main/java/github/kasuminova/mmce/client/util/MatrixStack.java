@@ -7,24 +7,28 @@ import software.bernie.geckolib3.geo.render.built.GeoCube;
 import javax.vecmath.Matrix3f;
 import javax.vecmath.Matrix4f;
 import javax.vecmath.Vector3f;
-import java.util.ArrayDeque;
+import java.util.Arrays;
 
 public class MatrixStack {
-    private final ArrayDeque<Matrix4f> model  = new ArrayDeque<>();
-    private final ArrayDeque<Matrix3f> normal = new ArrayDeque<>();
+    private static final int INITIAL_DEPTH = 8;
+
+    // 下标即栈层级：model[0] 恒为单位矩阵，depth 指向栈顶。push 仅做 set() 值拷贝，不分配。
+    private Matrix4f[] model  = new Matrix4f[INITIAL_DEPTH];
+    private Matrix3f[] normal = new Matrix3f[INITIAL_DEPTH];
+    private int depth = 0;
 
     private final Matrix4f tempModelMatrix  = new Matrix4f();
     private final Matrix3f tempNormalMatrix = new Matrix3f();
 
+    private final Matrix4f tempRotationModel  = new Matrix4f();
+    private final Matrix3f tempRotationNormal = new Matrix3f();
+
     public MatrixStack() {
-        Matrix4f model = new Matrix4f();
-        Matrix3f normal = new Matrix3f();
+        model[0] = new Matrix4f();
+        normal[0] = new Matrix3f();
 
-        model.setIdentity();
-        normal.setIdentity();
-
-        this.model.addFirst(model);
-        this.normal.addFirst(normal);
+        model[0].setIdentity();
+        normal[0].setIdentity();
     }
 
     @SuppressWarnings({"unused", "NonReproducibleMathCall"})
@@ -45,27 +49,41 @@ public class MatrixStack {
     }
 
     public Matrix4f getModelMatrix() {
-        return this.model.peek();
+        return this.model[this.depth];
     }
 
     public Matrix3f getNormalMatrix() {
-        return this.normal.peek();
+        return this.normal[this.depth];
     }
 
     public void push() {
-        this.model.addFirst(new Matrix4f(getModelMatrix()));
-        this.normal.addFirst(new Matrix3f(getNormalMatrix()));
+        int next = this.depth + 1;
+        if (next >= this.model.length) {
+            grow(next + 1);
+        }
+        if (this.model[next] == null) {
+            this.model[next] = new Matrix4f();
+            this.normal[next] = new Matrix3f();
+        }
+        this.model[next].set(this.model[this.depth]);
+        this.normal[next].set(this.normal[this.depth]);
+        this.depth = next;
     }
 
     /* Translate */
 
     public void pop() {
-        if (this.model.size() == 1) {
+        if (this.depth == 0) {
             throw new IllegalStateException("A one level stack can't be popped!");
         }
 
-        this.model.pop();
-        this.normal.pop();
+        this.depth--;
+    }
+
+    private void grow(int required) {
+        int newLen = Math.max(required, this.model.length * 2);
+        this.model = Arrays.copyOf(this.model, newLen);
+        this.normal = Arrays.copyOf(this.normal, newLen);
     }
 
     public void translate(float x, float y, float z) {
@@ -176,28 +194,26 @@ public class MatrixStack {
 
     public void rotate(GeoCube bone) {
         Vector3f rotation = bone.rotation;
-        Matrix4f matrix4f = new Matrix4f();
-        Matrix3f matrix3f = new Matrix3f();
 
         this.tempModelMatrix.setIdentity();
-        matrix4f.rotZ(rotation.getZ());
-        this.tempModelMatrix.mul(matrix4f);
+        this.tempRotationModel.rotZ(rotation.getZ());
+        this.tempModelMatrix.mul(this.tempRotationModel);
 
-        matrix4f.rotY(rotation.getY());
-        this.tempModelMatrix.mul(matrix4f);
+        this.tempRotationModel.rotY(rotation.getY());
+        this.tempModelMatrix.mul(this.tempRotationModel);
 
-        matrix4f.rotX(rotation.getX());
-        this.tempModelMatrix.mul(matrix4f);
+        this.tempRotationModel.rotX(rotation.getX());
+        this.tempModelMatrix.mul(this.tempRotationModel);
 
         this.tempNormalMatrix.setIdentity();
-        matrix3f.rotZ(rotation.getZ());
-        this.tempNormalMatrix.mul(matrix3f);
+        this.tempRotationNormal.rotZ(rotation.getZ());
+        this.tempNormalMatrix.mul(this.tempRotationNormal);
 
-        matrix3f.rotY(rotation.getY());
-        this.tempNormalMatrix.mul(matrix3f);
+        this.tempRotationNormal.rotY(rotation.getY());
+        this.tempNormalMatrix.mul(this.tempRotationNormal);
 
-        matrix3f.rotX(rotation.getX());
-        this.tempNormalMatrix.mul(matrix3f);
+        this.tempRotationNormal.rotX(rotation.getX());
+        this.tempNormalMatrix.mul(this.tempRotationNormal);
 
         getModelMatrix().mul(this.tempModelMatrix);
         getNormalMatrix().mul(this.tempNormalMatrix);

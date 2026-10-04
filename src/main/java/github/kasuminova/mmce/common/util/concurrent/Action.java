@@ -6,6 +6,10 @@ import stanhebben.zenscript.annotations.ZenClass;
 @ZenRegister
 @ZenClass("mods.modularmachinery.Action")
 @FunctionalInterface
-public interface Action {
+public interface Action extends Runnable {
     void doAction();
+
+    default void run() {
+        doAction();
+    }
 }

@@ -8,7 +8,6 @@
 
 package hellfirepvp.modularmachinery.common.crafting;
 
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import hellfirepvp.modularmachinery.ModularMachinery;
 import hellfirepvp.modularmachinery.common.CommonProxy;
@@ -46,6 +45,8 @@ public class RecipeRegistry {
     private static final RecipeRegistry                                                  INSTANCE                   = new RecipeRegistry();
     private static final Map<ResourceLocation, TreeMap<Integer, TreeSet<MachineRecipe>>> REGISTRY_RECIPE_BY_MACHINE = new HashMap<>();
     private static final Map<ResourceLocation, MachineRecipe>                            RECIPE_REGISTRY            = new HashMap<>();
+    // getRecipesFor 的扁平化缓存，避免每次配方搜索构造 Guava 组合迭代器；在注册表变更点整体失效。
+    private static final Map<ResourceLocation, List<MachineRecipe>>                      FLATTENED_RECIPES_CACHE    = new ConcurrentHashMap<>();
 
     private final List<PreparedRecipe>       earlyRecipes        = new LinkedList<>();
     private final List<RecipeAdapterBuilder> earlyRecipeAdapters = new LinkedList<>();
@@ -59,11 +60,21 @@ public class RecipeRegistry {
 
     @Nonnull
     public static Iterable<MachineRecipe> getRecipesFor(DynamicMachine machine) {
-        TreeMap<Integer, TreeSet<MachineRecipe>> recipes = REGISTRY_RECIPE_BY_MACHINE.get(machine.getRegistryName());
-        if (recipes == null) {
-            return Lists.newArrayList();
+        ResourceLocation key = machine.getRegistryName();
+        List<MachineRecipe> flattened = FLATTENED_RECIPES_CACHE.get(key);
+        if (flattened != null) {
+            return flattened;
         }
-        return Iterables.concat(recipes.values());
+        TreeMap<Integer, TreeSet<MachineRecipe>> recipes = REGISTRY_RECIPE_BY_MACHINE.get(key);
+        if (recipes == null) {
+            return FLATTENED_RECIPES_CACHE.computeIfAbsent(key, k -> new ArrayList<>(0));
+        }
+        flattened = new ArrayList<>();
+        for (TreeSet<MachineRecipe> set : recipes.values()) {
+            flattened.addAll(set);
+        }
+        FLATTENED_RECIPES_CACHE.put(key, flattened);
+        return flattened;
     }
 
     @Nullable
@@ -151,6 +162,7 @@ public class RecipeRegistry {
     }
 
     public static void reloadAdapters() {
+        FLATTENED_RECIPES_CACHE.clear();
         for (RecipeAdapterAccessor accessor : RecipeLoader.RECIPE_ADAPTER_ACCESSORS) {
             Map<Integer, TreeSet<MachineRecipe>> machineRecipeList = REGISTRY_RECIPE_BY_MACHINE.get(accessor.getOwningMachine());
             for (MachineRecipe cached : accessor.getCachedRecipes()) {
@@ -175,6 +187,7 @@ public class RecipeRegistry {
     }
 
     public static void registerRecipes(Map<DynamicMachine, List<MachineRecipe>> map) {
+        FLATTENED_RECIPES_CACHE.clear();
         for (DynamicMachine machine : map.keySet()) {
             List<MachineRecipe> recipes = map.get(machine);
             for (MachineRecipe recipe : recipes) {
@@ -253,6 +266,7 @@ public class RecipeRegistry {
     public void clearAllRecipes() {
         RECIPE_REGISTRY.clear();
         REGISTRY_RECIPE_BY_MACHINE.clear();
+        FLATTENED_RECIPES_CACHE.clear();
         this.earlyRecipes.clear();
         this.earlyRecipeAdapters.clear();
     }

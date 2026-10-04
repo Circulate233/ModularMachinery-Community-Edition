@@ -1,7 +1,7 @@
 {
-  "parent": "modularmachinery:block/blockmodel_overlay_all",
-  "textures": {
-    "bg_all": "modularmachinery:blocks/blockcasing_plain",
-    "ov_all": "modularmachinery:blocks/overlay_upgrade_bus_reinforced"
-  }
+    "parent": "modularmachinery:block/blockmodel_overlay_all",
+    "textures": {
+        "bg_all": "modularmachinery:blocks/blockcasing_plain",
+        "ov_all": "modularmachinery:blocks/overlay_upgrade_bus_reinforced"
+    }
 }

@@ -13,9 +13,6 @@ import io.netty.util.internal.ThrowableUtil;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.longs.LongArrayList;
-import it.unimi.dsi.fastutil.longs.LongList;
-import it.unimi.dsi.fastutil.longs.LongListIterator;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
@@ -23,6 +20,8 @@ import net.minecraftforge.fml.common.thread.SidedThreadGroups;
 import net.minecraftforge.fml.relauncher.Side;
 
 import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -63,6 +62,8 @@ public class TaskExecutor {
     private final Queue<Action>                 mainThreadActions          = Queues.createConcurrentQueue();
     private final Queue<TileEntitySynchronized> requireUpdateTEQueue       = Queues.createConcurrentQueue();
     private final Queue<TileEntitySynchronized> requireMarkNoUpdateTEQueue = Queues.createConcurrentQueue();
+    // markNoUpdate 属于幂等标记操作，同一 TE 在队列中只保留一份，避免每 tick 重复入队。
+    private final Set<TileEntitySynchronized>   requireMarkNoUpdateTESet   = ConcurrentHashMap.newKeySet();
 
     private final TaskSubmitter submitter = new TaskSubmitter();
 
@@ -215,6 +216,8 @@ public class TaskExecutor {
         }
 
         while ((te = requireMarkNoUpdateTEQueue.poll()) != null) {
+            // 先移出去重标记再执行：若执行期间同一线程再次提交，可重新入队。
+            requireMarkNoUpdateTESet.remove(te);
             te.markNoUpdate();
         }
     }
@@ -275,7 +278,9 @@ public class TaskExecutor {
     }
 
     public void addTEMarkNoUpdateTask(final TileEntitySynchronized te) {
-        requireMarkNoUpdateTEQueue.offer(te);
+        if (requireMarkNoUpdateTESet.add(te)) {
+            requireMarkNoUpdateTEQueue.offer(te);
+        }
     }
 
     private void execute(final ActionExecutor executor) {
@@ -299,13 +304,13 @@ public class TaskExecutor {
         }
 
         synchronized (executeGroups) {
-            LongList toRemove = new LongArrayList();
-            for (final ExecuteGroup group : executeGroups.values()) {
+            for (final var it = executeGroups.long2ObjectEntrySet().iterator(); it.hasNext(); ) {
+                ExecuteGroup group = it.next().getValue();
                 if (group.isSubmitted()) {
                     continue;
                 }
                 if (group.isEmpty()) {
-                    toRemove.add(group.getGroupId());
+                    it.remove();
                     continue;
                 }
                 ActionExecutor groupExecutor = new ActionExecutor(() -> {
@@ -318,10 +323,6 @@ public class TaskExecutor {
                 group.setSubmitted(true);
                 execute(groupExecutor);
                 submitted.offer(groupExecutor);
-            }
-            LongListIterator it = toRemove.iterator();
-            while (it.hasNext()) {
-                executeGroups.remove(it.nextLong());
             }
         }
     }

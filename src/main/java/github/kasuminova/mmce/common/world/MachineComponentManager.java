@@ -28,16 +28,16 @@ public class MachineComponentManager {
     }
 
     @Optional.Method(modid = "appliedenergistics2")
-    private static Pair<BlockPos, TileEntity> getResult(TileEntity component, World world) {
+    private static Pair<BlockPos, TileEntity> getResult(TileEntity component) {
         BlockPos pos = component.getPos();
         TileEntity te = component;
 
         if (component instanceof MEPatternMirrorImage mepi) {
             if (mepi.providerPos != null) {
-                TileEntity tileEntity = world.getTileEntity(mepi.providerPos);
-                if (tileEntity instanceof MEPatternProvider mep) {
-                    te = mep;
-                    pos = mep.getPos();
+                MEPatternProvider tileEntity = MEPatternProvider.coordinate.getOrDefault(mepi.getWorld().provider.getDimension(),Collections.emptyMap()).get(mepi.providerPos);
+                if (tileEntity != null && !tileEntity.isInvalid()) {
+                    te = tileEntity;
+                    pos = tileEntity.getPos();
                 }
             }
         }
@@ -65,7 +65,7 @@ public class MachineComponentManager {
         TileEntity te;
 
         if (Loader.isModLoaded("appliedenergistics2")) {
-            Pair<BlockPos, TileEntity> result = getResult(component, world);
+            Pair<BlockPos, TileEntity> result = getResult(component);
             pos = result.getLeft();
             te = result.getRight();
         } else {
@@ -110,7 +110,7 @@ public class MachineComponentManager {
         TileEntity te;
 
         if (Loader.isModLoaded("appliedenergistics2")) {
-            Pair<BlockPos, TileEntity> result = getResult(component, world);
+            Pair<BlockPos, TileEntity> result = getResult(component);
             pos = result.getLeft();
             te = result.getRight();
         } else {

@@ -7,9 +7,7 @@ import hellfirepvp.modularmachinery.common.tiles.base.MachineComponentTile;
 import hellfirepvp.modularmachinery.common.tiles.base.SelectiveUpdateTileEntity;
 import hellfirepvp.modularmachinery.common.tiles.base.TileColorableMachineComponent;
 import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.WorldServer;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -28,10 +26,10 @@ public class MEPatternMirrorImage extends TileColorableMachineComponent implemen
     @Nullable
     @Override
     public MachineComponent<InfItemFluidHandler> provideComponent() {
-        if (!this.world.isRemote && providerPos != null && ((WorldServer) this.world).getChunkProvider().chunkExists(providerPos.getX() >> 4, providerPos.getZ() >> 4)) {
-            TileEntity tileEntity = this.world.getTileEntity(providerPos);
-            if (tileEntity instanceof MEPatternProvider mep) {
-                return mep.provideComponent();
+        if (!this.world.isRemote && providerPos != null) {
+            MEPatternProvider tileEntity = MEPatternProvider.coordinate.getOrDefault(this.world.provider.getDimension(),Collections.emptyMap()).get(providerPos);
+            if (tileEntity != null && !tileEntity.isInvalid()) {
+                return tileEntity.provideComponent();
             }
         }
         return null;
@@ -40,10 +38,10 @@ public class MEPatternMirrorImage extends TileColorableMachineComponent implemen
     @NotNull
     @Override
     public Collection<MachineComponent<?>> provideComponents() {
-        if (!this.world.isRemote && providerPos != null && ((WorldServer) this.world).getChunkProvider().chunkExists(providerPos.getX() >> 4, providerPos.getZ() >> 4)) {
-            TileEntity tileEntity = this.world.getTileEntity(providerPos);
-            if (tileEntity instanceof MEPatternProvider mep) {
-                return mep.provideComponents();
+        if (!this.world.isRemote && providerPos != null) {
+            MEPatternProvider tileEntity = MEPatternProvider.coordinate.getOrDefault(this.world.provider.getDimension(),Collections.emptyMap()).get(providerPos);
+            if (tileEntity != null && !tileEntity.isInvalid()) {
+                return tileEntity.provideComponents();
             }
         }
         return Collections.emptyList();

@@ -121,7 +121,6 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
     public static final int BLUEPRINT_SLOT = 0, ACCELERATOR_SLOT = 1;
     public static int structureCheckDelay = 30, maxStructureCheckDelay = 200;
     public static boolean delayedStructureCheck                 = true;
-    public static boolean cleanCustomDataOnStructureCheckFailed = false;
     public static boolean enableSecuritySystem                  = false;
     public static boolean enableFullDataSync                    = false;
 
@@ -187,10 +186,6 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
             structureCheckDelay = 30;
             maxStructureCheckDelay = 100;
         }
-
-        //当结构检查失败时，是否清空自定义数据
-        cleanCustomDataOnStructureCheckFailed = config.getBoolean("clean-custom-data-on-structure-check-failed", "general",
-            false, "When enabled, the customData will be cleared when multiblock structure check failed.");
 
         enableSecuritySystem = config.getBoolean("enable-security-system", "general", false,
             "When enabled, players using the controller will have their owner checked and non-owners will be denied access.");
@@ -382,11 +377,6 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
             setControllerStatus(CraftingStatus.MISSING_STRUCTURE);
             incrementStructureCheckCounter();
             resetRecipeSearchRetryCount();
-
-            if (cleanCustomDataOnStructureCheckFailed) {
-                customData = new NBTTagCompound();
-                customModifiers.clear();
-            }
 
             if (workMode == WorkMode.SYNC) {
                 notifyStructureFormedState(false);
@@ -1381,6 +1371,8 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
     @Override
     public void readCustomNBT(NBTTagCompound compound) {
         super.readCustomNBT(compound);
+        readControllerDataNBT(compound);
+
         this.inventory = IOInventory.deserialize(this, compound.getCompoundTag("items"));
         this.inventory.setStackLimit(1, BLUEPRINT_SLOT);
 
@@ -1437,22 +1429,23 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
                 });
                 compound.setTag("dynamicPatterns", tagList);
             }
-            if (!customData.isEmpty()) {
-                compound.setTag("customData", customData);
-            }
-            if (!customModifiers.isEmpty()) {
-                NBTTagList tagList = new NBTTagList();
-                customModifiers.forEach((key, modifier) -> {
-                    if (key != null && modifier != null) {
-                        NBTTagCompound modifierTag = new NBTTagCompound();
-                        modifierTag.setString("key", key);
-                        modifierTag.setTag("modifier", modifier.serialize());
-                        tagList.appendTag(modifierTag);
-                    }
-                });
-                compound.setTag("customModifier", tagList);
-            }
         }
+
+        // These are controller-owned configuration values, not structure-match state.
+        // Persist them even while the multiblock is temporarily unformed.
+        compound.setTag("customData", customData);
+        NBTTagList customModifierTags = new NBTTagList();
+        customModifiers.forEach((key, modifier) -> {
+            if (key == null || modifier == null) {
+                ModularMachinery.log.warn("Skipping invalid custom modifier on controller at {}", getPos());
+                return;
+            }
+            NBTTagCompound modifierTag = new NBTTagCompound();
+            modifierTag.setString("key", key);
+            modifierTag.setTag("modifier", modifier.serialize());
+            customModifierTags.appendTag(modifierTag);
+        });
+        compound.setTag("customModifier", customModifierTags);
     }
 
     protected void readMachineNBT(NBTTagCompound compound) {
@@ -1460,8 +1453,22 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
             resetMachine(true);
             return;
         }
+        if (!compound.hasKey("machine", Constants.NBT.TAG_STRING) ||
+            !compound.hasKey("rotation", Constants.NBT.TAG_ANY_NUMERIC)) {
+            ModularMachinery.log.warn("Ignoring malformed machine state NBT on controller at {}", getPos());
+            resetMachine(true);
+            return;
+        }
 
-        ResourceLocation rl = new ResourceLocation(compound.getString("machine"));
+        String machineName = compound.getString("machine");
+        ResourceLocation rl;
+        try {
+            rl = new ResourceLocation(machineName);
+        } catch (IllegalArgumentException e) {
+            ModularMachinery.log.warn("Ignoring invalid machine identifier {} on controller at {}", machineName, getPos(), e);
+            resetMachine(true);
+            return;
+        }
         DynamicMachine machine = MachineRegistry.getRegistry().getMachine(rl);
         if (machine == null) {
             ModularMachinery.log.info("Couldn't find machine named {} for controller at {}", rl, getPos());
@@ -1471,8 +1478,17 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
         this.foundMachine = machine;
         this.controllerRotation = EnumFacing.byHorizontalIndex(compound.getByte("rotation"));
 
-        if (compound.hasKey("prevMachine")) {
-            this.prevMachine = MachineRegistry.getRegistry().getMachine(new ResourceLocation(compound.getString("prevMachine")));
+        if (compound.hasKey("prevMachine", Constants.NBT.TAG_STRING)) {
+            String previousMachineName = compound.getString("prevMachine");
+            try {
+                this.prevMachine = MachineRegistry.getRegistry().getMachine(new ResourceLocation(previousMachineName));
+            } catch (IllegalArgumentException e) {
+                ModularMachinery.log.warn("Ignoring invalid previous machine identifier {} on controller at {}",
+                    previousMachineName, getPos(), e);
+            }
+        } else if (compound.hasKey("prevMachine")) {
+            ModularMachinery.log.warn("Ignoring prevMachine with invalid NBT type {} on controller at {}",
+                compound.getTagId("prevMachine"), getPos());
         }
 
         TaggedPositionBlockArray pattern = BlockArrayCache.getBlockArrayCache(machine.getPattern(), this.controllerRotation);
@@ -1503,17 +1519,63 @@ public abstract class TileMultiblockMachineController extends TileEntityRestrict
         }
         this.foundReplacements = replacements;
 
+    }
+
+    private void readControllerDataNBT(final NBTTagCompound compound) {
         if (compound.hasKey("customData")) {
-            this.customData = compound.getCompoundTag("customData");
-        }
-        this.customModifiers.clear();
-        if (compound.hasKey("customModifier")) {
-            NBTTagList tagList = compound.getTagList("customModifier", Constants.NBT.TAG_COMPOUND);
-            for (int i = 0; i < tagList.tagCount(); i++) {
-                NBTTagCompound modifierTag = tagList.getCompoundTagAt(i);
-                this.customModifiers.put(modifierTag.getString("key"), RecipeModifier.deserialize(modifierTag.getCompoundTag("modifier")));
+            if (compound.hasKey("customData", Constants.NBT.TAG_COMPOUND)) {
+                this.customData = compound.getCompoundTag("customData");
+            } else {
+                ModularMachinery.log.warn("Ignoring customData with invalid NBT type {} on controller at {}",
+                    compound.getTagId("customData"), getPos());
             }
         }
+
+        if (!compound.hasKey("customModifier")) {
+            return;
+        }
+        if (!compound.hasKey("customModifier", Constants.NBT.TAG_LIST)) {
+            ModularMachinery.log.warn("Ignoring customModifier with invalid NBT type {} on controller at {}",
+                compound.getTagId("customModifier"), getPos());
+            return;
+        }
+
+        NBTTagList modifierTags = (NBTTagList) compound.getTag("customModifier");
+        if (!modifierTags.isEmpty() && modifierTags.getTagType() != Constants.NBT.TAG_COMPOUND) {
+            ModularMachinery.log.warn("Ignoring customModifier list with invalid entry type {} on controller at {}",
+                modifierTags.getTagType(), getPos());
+            return;
+        }
+
+        Map<String, RecipeModifier> loadedModifiers = new HashMap<>();
+        for (int i = 0; i < modifierTags.tagCount(); i++) {
+            NBTTagCompound modifierTag = modifierTags.getCompoundTagAt(i);
+            if (!modifierTag.hasKey("key", Constants.NBT.TAG_STRING) ||
+                !modifierTag.hasKey("modifier", Constants.NBT.TAG_COMPOUND)) {
+                ModularMachinery.log.warn("Skipping malformed custom modifier entry {} on controller at {}", i, getPos());
+                continue;
+            }
+
+            String key = modifierTag.getString("key");
+            if (key.isEmpty()) {
+                ModularMachinery.log.warn("Skipping custom modifier entry {} with an empty key on controller at {}", i, getPos());
+                continue;
+            }
+
+            try {
+                RecipeModifier modifier = RecipeModifier.deserialize(modifierTag.getCompoundTag("modifier"));
+                if (modifier == null) {
+                    ModularMachinery.log.warn("Skipping invalid custom modifier entry {} on controller at {}", i, getPos());
+                    continue;
+                }
+                loadedModifiers.put(key, modifier);
+            } catch (RuntimeException e) {
+                ModularMachinery.log.warn("Skipping custom modifier entry {} that failed to deserialize on controller at {}", i, getPos(), e);
+            }
+        }
+
+        this.customModifiers.clear();
+        this.customModifiers.putAll(loadedModifiers);
     }
 
     @Nullable

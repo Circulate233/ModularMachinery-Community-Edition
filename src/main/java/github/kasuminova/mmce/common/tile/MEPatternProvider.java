@@ -66,6 +66,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.EnumFacing;
+import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fml.common.Optional;
@@ -82,13 +83,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.IntStream;
 
 public class MEPatternProvider extends MEMachineComponent implements ICraftingProvider, IAEAppEngInventory, IAEFluidInventory, MachineComponentTileNotifiable, IInterfaceHost, ICustomNameObject , MachineCombinationComponent {
 
     public static final  int                           PATTERNS               = 36;
     public static final  int                           SUB_ITEM_HANDLER_SLOTS = 2;
+    public static final  Map<Integer, Map<BlockPos, MEPatternProvider>> coordinate = new ConcurrentHashMap<>();
     private static final ItemStack                     item                   = new ItemStack(ItemsMM.mePatternProvider);
     protected final      AppEngInternalInventory       subItemHandler         = new AppEngInternalInventory(this, SUB_ITEM_HANDLER_SLOTS);
     protected final      AEFluidInventoryUpgradeable   subFluidHandler        = new AEFluidInventoryUpgradeable(this, 1, Integer.MAX_VALUE);
@@ -648,6 +652,8 @@ public class MEPatternProvider extends MEMachineComponent implements ICraftingPr
         super.validate();
         if (!world.isRemote) {
             ModularMachinery.EXECUTE_MANAGER.addSyncTask(this::refreshPatterns);
+            coordinate.computeIfAbsent(world.provider.getDimension(), i -> new ConcurrentHashMap<>())
+                      .put(pos, this);
         }
     }
 
@@ -779,6 +785,12 @@ public class MEPatternProvider extends MEMachineComponent implements ICraftingPr
     public void invalidate() {
         super.invalidate();
         GROUP_ACQUIRER.addAndGet(-PATTERNS);
+        if (!world.isRemote) {
+            var map = coordinate.getOrDefault(world.provider.getDimension(), Collections.emptyMap());
+            if (!map.isEmpty()) {
+                map.remove(pos);
+            }
+        }
     }
 
     public enum WorkModeSetting {
